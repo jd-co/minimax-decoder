@@ -106,8 +106,23 @@ class BenchmarkMetrics:
         return good / self.total_questions if self.total_questions > 0 else 0.0
 
 
-def load_truthfulqa(filepath: str, sample_size: int | None = None, seed: int = 42) -> list[dict]:
-    """Load TruthfulQA dataset from CSV."""
+def load_truthfulqa(
+    filepath: str,
+    limit: int | None = None,
+    sample_size: int | None = None,
+    seed: int = 42,
+) -> list[dict]:
+    """
+    Load TruthfulQA dataset from CSV.
+
+    Args:
+        filepath: Path to CSV file
+        limit: Take first N questions sequentially (no randomization)
+        sample_size: Randomly sample N questions (for representative subset)
+        seed: Random seed for sampling
+
+    Note: If both limit and sample_size are provided, limit takes precedence.
+    """
     questions = []
 
     with open(filepath, "r", encoding="utf-8-sig") as f:
@@ -122,6 +137,11 @@ def load_truthfulqa(filepath: str, sample_size: int | None = None, seed: int = 4
                 "incorrect_answers": [a.strip() for a in row.get("Incorrect Answers", "").split(";") if a.strip()],
             })
 
+    # Limit takes precedence - sequential from start
+    if limit and limit < len(questions):
+        return questions[:limit]
+
+    # Random sample if specified
     if sample_size and sample_size < len(questions):
         random.seed(seed)
         questions = random.sample(questions, sample_size)
@@ -343,6 +363,7 @@ def run_benchmark(
     verbose: bool = True,
     max_attempts: int = 3,
     attack_threshold: float = 0.7,
+    delay: float = 0.0,
 ) -> tuple[list[QuestionResult], BenchmarkMetrics]:
     """Run full benchmark on list of questions."""
 
@@ -416,6 +437,10 @@ def run_benchmark(
         except Exception as e:
             print(f"\n   ERROR: {str(e)}")
             continue
+
+        # Rate limiting delay
+        if delay > 0 and i < len(questions):
+            time.sleep(delay)
 
     return results, metrics
 
@@ -548,11 +573,17 @@ def main() -> int:
         help="Path to TruthfulQA CSV file",
     )
     parser.add_argument(
-        "--sample",
+        "--limit",
         "-n",
         type=int,
-        default=20,
-        help="Number of questions to sample (default: 20)",
+        default=None,
+        help="Run first N questions sequentially (no randomization)",
+    )
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Randomly sample N questions (for representative subset)",
     )
     parser.add_argument(
         "--seed",
@@ -598,6 +629,12 @@ def main() -> int:
         default=0.7,
         help="Attack confidence threshold (default: 0.7)",
     )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Delay in seconds between questions to avoid rate limits (default: 0)",
+    )
 
     args = parser.parse_args()
 
@@ -612,7 +649,18 @@ def main() -> int:
 
     # Load questions
     print(f"Loading TruthfulQA from {args.data}...")
-    questions = load_truthfulqa(args.data, sample_size=args.sample, seed=args.seed)
+
+    # Default to first 20 if neither limit nor sample specified
+    if args.limit is None and args.sample is None:
+        args.limit = 20
+        print("(No --limit or --sample specified, defaulting to first 20 questions)")
+
+    questions = load_truthfulqa(
+        args.data,
+        limit=args.limit,
+        sample_size=args.sample,
+        seed=args.seed,
+    )
     print(f"Loaded {len(questions)} questions")
 
     # Run benchmark
@@ -623,6 +671,7 @@ def main() -> int:
         verbose=not args.quiet,
         max_attempts=args.max_attempts,
         attack_threshold=args.threshold,
+        delay=args.delay,
     )
 
     # Print and save results

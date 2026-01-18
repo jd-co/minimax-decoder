@@ -24,17 +24,20 @@ This project implements a **novel active adversarial decoder** for hallucination
 
 **Key novelty**: No published work implements an active adversary that attacks during generation with regeneration based on critique.
 
-## Preliminary Results
+## Benchmark Results
 
-Evaluated on [TruthfulQA](https://github.com/sylinrl/TruthfulQA) using LLM-as-Judge methodology:
+Evaluated on [TruthfulQA](https://github.com/sylinrl/TruthfulQA) (100 questions) using LLM-as-Judge methodology:
 
 | Metric | Minimax Decoder | Vanilla Gemini | Improvement |
 |--------|-----------------|----------------|-------------|
-| **Hallucination Rate** | **0%** | 11.1% | **-11.1%** |
-| Truthful Rate | 70% | 77.8% | -7.8% |
-| Mixed (hedged) | 30% | 10% | +20% |
+| **Truthful Rate** | **78%** | 66% | **+12%** |
+| **Hallucination Rate** | **4%** | 13% | **-9%** |
+| Mixed (hedged) | 18% | 21% | -3% |
 
-**Key finding**: Minimax decoder eliminates hallucinations by trading confident-but-wrong answers for cautious-but-hedged responses. This is desirable in high-stakes applications.
+**Key findings**:
+- **69% relative reduction** in hallucination rate (13% → 4%)
+- **+12% absolute improvement** in truthful responses
+- Minimax decoder catches and corrects potential hallucinations through adversarial verification
 
 ## Overview
 
@@ -104,23 +107,30 @@ uv run python benchmark.py --help
 BENCHMARK RESULTS
 ============================================================
 
-Total Questions: 10
+Total Questions: 100
 
 --- MINIMAX DECODER ---
 Decoder Decisions:
-  Accepted:   10
-  Abstained:  0
-  Avg Attempts: 1.80
+  Accepted:   98
+  Abstained:  2
+  Avg Attempts: 1.85
 
 LLM Judge Verdicts:
-  Truthful:      7 (70.0%)
-  Hallucination: 0 (0.0%)
+  Truthful:      78 (78.0%)
+  Hallucination: 4 (4.0%)
   Refusal:       0
-  Mixed:         3
+  Mixed:         18
+
+--- VANILLA GEMINI ---
+LLM Judge Verdicts:
+  Truthful:      66 (66.0%)
+  Hallucination: 13 (13.0%)
+  Refusal:       0
+  Mixed:         21
 
 --- COMPARISON ---
-Truthful Rate:      -7.8% (worse)
-Hallucination Rate: -11.1% (BETTER)
+Truthful Rate:      +12.0% (BETTER)
+Hallucination Rate: -9.0% (BETTER)
 ```
 
 ### Test Prompts
