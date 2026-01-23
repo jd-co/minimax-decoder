@@ -55,24 +55,20 @@ class DraftResponse(BaseModel):
 
 
 class AttackResult(BaseModel):
-    """Adversary's attack on the draft."""
-    weakest_claim: str = Field(
-        description="The claim most likely to be false or unsupported"
+    """Adversary's attack on the draft - Binary decision."""
+    issue_found: bool = Field(
+        description="Whether a factual issue was found (True) or not (False)"
     )
-    attack_reasoning: str = Field(
-        description="Why this claim is suspect - cite specific issues"
-    )
-    alternative_truth: Optional[str] = Field(
-        description="What might actually be true instead, if known",
+    problematic_claim: Optional[str] = Field(
+        description="The claim that is false or unsupported (if issue_found=True)",
         default=None
     )
-    confidence_in_attack: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Confidence that this claim is indeed problematic (0-1)"
+    reasoning: str = Field(
+        description="Why this is/isn't an issue - specific explanation"
     )
-    severity: SeverityLevel = Field(
-        description="Severity if wrong: critical, moderate, minor"
+    correction: Optional[str] = Field(
+        description="What is actually true (if known)",
+        default=None
     )
 
 
@@ -90,7 +86,10 @@ class DecoderMetrics(BaseModel):
     """Metrics tracked during decoding process."""
     total_attempts: int = Field(default=1)
     final_decision: DecisionType
-    attack_confidences: list[float] = Field(default_factory=list)
+    issues_found_per_attempt: list[bool] = Field(
+        default_factory=list,
+        description="Whether issue was found in each attempt"
+    )
     time_taken_seconds: float
     regeneration_count: int = Field(default=0)
 

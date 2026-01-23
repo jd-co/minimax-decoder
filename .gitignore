@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
 
 # Environment variables
 .env
@@ -16,3 +17,24 @@ wheels/
 # IDE and tools
 .claude/
 .vscode/
+.idea/
+
+# Test outputs
+test_*.json
+
+# Model cache (HuggingFace)
+.cache/
+~/.cache/huggingface/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Research notes (keep local, don't commit)
+research_report.md
+
+# Lock files (optional - uncomment if you want to exclude)
+# uv.lock

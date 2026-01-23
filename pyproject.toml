@@ -1,11 +1,19 @@
 [project]
 name = "minimax-decoder"
 version = "0.1.0"
-description = "Add your description here"
+description = "Active Minimax Decoder for LLM hallucination reduction using adversarial verification"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "google-genai>=1.59.0",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
+    "groq>=1.0.0",
+    "huggingface-hub>=0.34.0,<1.0",
+    "transformers>=4.45.0",
+    "accelerate>=0.30.0",
 ]
+
+[project.optional-dependencies]
+# Install torch separately for local inference
+local = ["torch>=2.0.0"]

@@ -1,7 +1,9 @@
 """
 CLI demo for Active Minimax Decoder.
 Adversarial verification for LLM hallucination reduction.
+Supports multiple model providers: Gemini, Groq, HuggingFace.
 """
+
 import argparse
 import json
 import os
@@ -11,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from decoder import MinimaxDecoder
+from config import list_models, get_model_config, MODELS
+from decoder import create_decoder_from_config
 from models import DecoderResult
 
 
@@ -52,47 +55,82 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Using default Gemini models
   %(prog)s --prompt "What year was Python created?"
+
+  # Using SLM generator with Gemini adversary
+  %(prog)s --generator llama-3.2-1b --adversary gemini-flash -p "Explain recursion"
+
+  # Using SmolLM2 for "small beats big" experiment
+  %(prog)s --generator smollm2-360m --adversary gemini-flash -p "What is the capital of France?"
+
+  # Run predefined tests
   %(prog)s --test safe_algorithm
   %(prog)s --run-all-tests
-  %(prog)s --list-tests
+
+  # List available models
+  %(prog)s --list-models
+  %(prog)s --list-models --slm-only
         """,
     )
+
+    # Model selection
     parser.add_argument(
-        "--prompt",
-        "-p",
+        "--generator", "-g",
+        type=str,
+        default="gemini-flash",
+        help="Generator model (default: gemini-flash). Use --list-models to see options",
+    )
+    parser.add_argument(
+        "--adversary", "-a",
+        type=str,
+        default="gemini-flash",
+        help="Adversary model (default: gemini-flash). Recommend using larger model",
+    )
+
+    # Prompt options
+    parser.add_argument(
+        "--prompt", "-p",
         type=str,
         help="Custom prompt to test",
     )
     parser.add_argument(
-        "--test",
-        "-t",
+        "--test", "-t",
         choices=list(TEST_PROMPTS.keys()),
         help="Run a predefined test prompt",
     )
+
+    # API keys (can be set via env vars)
     parser.add_argument(
-        "--api-key",
-        "-k",
+        "--google-api-key",
         type=str,
         default=os.environ.get("GOOGLE_API_KEY"),
-        help="Gemini API key (or set GOOGLE_API_KEY env var)",
+        help="Google/Gemini API key (or set GOOGLE_API_KEY env var)",
     )
     parser.add_argument(
-        "--max-attempts",
-        "-m",
+        "--groq-api-key",
+        type=str,
+        default=os.environ.get("GROQ_API_KEY"),
+        help="Groq API key (or set GROQ_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--hf-api-key",
+        type=str,
+        default=os.environ.get("HF_API_KEY"),
+        help="HuggingFace API key (or set HF_API_KEY env var)",
+    )
+
+    # Decoder options
+    parser.add_argument(
+        "--max-attempts", "-m",
         type=int,
         default=3,
         help="Maximum generation attempts (default: 3)",
     )
+
+    # Output options
     parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.7,
-        help="Attack confidence threshold (default: 0.7)",
-    )
-    parser.add_argument(
-        "--quiet",
-        "-q",
+        "--quiet", "-q",
         action="store_true",
         help="Suppress verbose output",
     )
@@ -101,6 +139,8 @@ Examples:
         action="store_true",
         help="Output result as JSON",
     )
+
+    # Batch/test options
     parser.add_argument(
         "--run-all-tests",
         action="store_true",
@@ -111,8 +151,31 @@ Examples:
         action="store_true",
         help="List all predefined test prompts",
     )
+    parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="List all available models",
+    )
+    parser.add_argument(
+        "--slm-only",
+        action="store_true",
+        help="When listing models, only show SLMs (<3B params)",
+    )
 
     args = parser.parse_args()
+
+    # Handle list models
+    if args.list_models:
+        print("Available models:")
+        print("-" * 70)
+        models = list_models(slm_only=args.slm_only)
+        for name in sorted(models):
+            cfg = MODELS[name]
+            slm_tag = " [SLM]" if cfg.is_slm else ""
+            size = f"{cfg.params_billions}B" if cfg.params_billions > 0 else "?"
+            print(f"  {name:20} {cfg.provider.value:12} {size:>6}{slm_tag}")
+            print(f"      {cfg.display_name}")
+        return 0
 
     # Handle list tests
     if args.list_tests:
@@ -123,19 +186,54 @@ Examples:
             print(f"  {prompt[:80]}..." if len(prompt) > 80 else f"  {prompt}")
         return 0
 
-    # Validate API key
-    if not args.api_key:
-        print("Error: No API key provided.")
-        print("Use --api-key or set GOOGLE_API_KEY environment variable")
+    # Build API keys dict
+    api_keys = {}
+    if args.google_api_key:
+        api_keys["gemini"] = args.google_api_key
+    if args.groq_api_key:
+        api_keys["groq"] = args.groq_api_key
+    if args.hf_api_key:
+        api_keys["huggingface"] = args.hf_api_key
+
+    # Validate models exist
+    try:
+        gen_config = get_model_config(args.generator)
+        adv_config = get_model_config(args.adversary)
+    except ValueError as e:
+        print(f"Error: {e}")
+        print("Use --list-models to see available models")
         return 1
 
-    # Initialize decoder
-    decoder = MinimaxDecoder(
-        api_key=args.api_key,
-        max_attempts=args.max_attempts,
-        attack_threshold=args.threshold,
-        verbose=not args.quiet,
-    )
+    # Check for required API keys (local provider doesn't need one)
+    required_providers = {gen_config.provider.value, adv_config.provider.value}
+    missing_keys = []
+    for provider in required_providers:
+        if provider == "local":
+            continue  # Local provider doesn't need API key
+        env_var = {
+            "gemini": "GOOGLE_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "huggingface": "HF_API_KEY",
+        }.get(provider)
+        if env_var and provider not in api_keys and not os.environ.get(env_var):
+            missing_keys.append(f"{env_var} (for {provider})")
+
+    if missing_keys:
+        print(f"Error: Missing API keys: {', '.join(missing_keys)}")
+        return 1
+
+    # Create decoder
+    try:
+        decoder = create_decoder_from_config(
+            generator_model=args.generator,
+            adversary_model=args.adversary,
+            api_keys=api_keys,
+            max_attempts=args.max_attempts,
+            verbose=not args.quiet,
+        )
+    except Exception as e:
+        print(f"Error creating decoder: {e}")
+        return 1
 
     # Run tests
     if args.run_all_tests:
@@ -148,7 +246,9 @@ Examples:
         parser.print_help()
         return 1
 
-    print(f"\nPrompt: {prompt}\n")
+    print(f"\nPrompt: {prompt}")
+    print(f"Generator: {args.generator} ({gen_config.display_name})")
+    print(f"Adversary: {args.adversary} ({adv_config.display_name})")
     print("=" * 60)
 
     result = decoder.decode(prompt)
@@ -161,7 +261,7 @@ Examples:
     return 0
 
 
-def run_all_tests(decoder: MinimaxDecoder, as_json: bool = False) -> int:
+def run_all_tests(decoder, as_json: bool = False) -> int:
     """Run all predefined test prompts."""
     results: dict[str, dict] = {}
 
@@ -219,13 +319,15 @@ def print_result(result: DecoderResult) -> None:
     print(f"  - Total attempts: {metrics.total_attempts}")
     print(f"  - Regenerations: {metrics.regeneration_count}")
     print(f"  - Time taken: {metrics.time_taken_seconds:.2f}s")
-    print(f"  - Attack confidences: {metrics.attack_confidences}")
+    print(f"  - Issues found per attempt: {metrics.issues_found_per_attempt}")
 
-    # Show attack history if there were rejections
+    # Show verification history if there were rejections
     if len(result.attack_history) > 1:
-        print("\nAttack History:")
+        print("\nVerification History:")
         for i, attack in enumerate(result.attack_history, 1):
-            print(f"  Attempt {i}: {attack.weakest_claim[:50]}... (conf: {attack.confidence_in_attack:.2f})")
+            status = "ISSUE" if attack.issue_found else "OK"
+            claim = attack.problematic_claim or "No issue"
+            print(f"  Attempt {i}: [{status}] {claim[:50]}...")
 
 
 if __name__ == "__main__":

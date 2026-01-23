@@ -1,257 +1,137 @@
-# Active Minimax Decoder
+# Minimax Decoder
 
-An adversarial verification system for reducing LLM hallucinations using game-theoretic principles.
+**Adversarial verification for reducing hallucinations in Small Language Models (SLMs)**
+
+> A 360M parameter model with verification achieves **3% hallucination rate** vs **28%** for a 1.5B model without verification.
 
 ```
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  GENERATOR   │───>│  ADVERSARY   │───>│   ARBITER    │
-│   (Draft)    │    │   (Attack)   │    │   (Decide)   │
+│  GENERATOR   │───▶│   VERIFIER   │───▶│   ARBITER    │
+│   (SLM)      │    │  (Gemini)    │    │   (Binary)   │
 └──────────────┘    └──────────────┘    └──────────────┘
        │                   │                   │
        └───────────────────┴───────────────────┘
-                    GAME LOOP
+                    VERIFICATION LOOP
 ```
 
-## Research Contribution
+## Key Results
 
-This project implements a **novel active adversarial decoder** for hallucination reduction. While prior work provides theoretical analysis, this is the first implementation of an active adversarial game loop during generation.
+Evaluated on [TruthfulQA](https://github.com/sylinrl/TruthfulQA) (100 questions):
 
-| Prior Work | What They Did | Our Contribution |
-|------------|---------------|------------------|
-| [Decoding Game (ICLR 2025)](https://arxiv.org/abs/2410.03968) | Theoretical analysis only | **Working implementation** |
-| [Consensus Game (ICLR 2024)](https://arxiv.org/abs/2310.09139) | Seeks equilibrium/consensus | **Adversarial attack** approach |
-| Contrastive methods (DoLa) | Layer contrast | **Active agent** attacking |
+| Model | Parameters | Truthful | Hallucination |
+|-------|-----------|----------|---------------|
+| SmolLM2-360M vanilla | 360M | 33% | 48% |
+| **SmolLM2-360M + Minimax** | 360M | 48% | **3%** |
+| Qwen-1.5B vanilla | 1.5B | 51% | 28% |
 
-**Key novelty**: No published work implements an active adversary that attacks during generation with regeneration based on critique.
+**Key finding**: A 360M model with adversarial verification has **9x fewer hallucinations** than a 4x larger 1.5B model without verification.
 
-## Benchmark Results
+## How It Works
 
-Evaluated on [TruthfulQA](https://github.com/sylinrl/TruthfulQA) (100 questions) using LLM-as-Judge methodology:
+1. **Generator (SLM)** creates a draft response
+2. **Verifier (Gemini)** checks for factual errors (binary: YES/NO)
+3. **Arbiter** decides:
+   - No issue → **ACCEPT**
+   - Issue found + attempts left → **REJECT** (regenerate with feedback)
+   - Issue found + max attempts → **ABSTAIN** (refuse to answer)
 
-| Metric | Minimax Decoder | Vanilla Gemini | Improvement |
-|--------|-----------------|----------------|-------------|
-| **Truthful Rate** | **78%** | 66% | **+12%** |
-| **Hallucination Rate** | **4%** | 13% | **-9%** |
-| Mixed (hedged) | 18% | 21% | -3% |
-
-**Key findings**:
-- **69% relative reduction** in hallucination rate (13% → 4%)
-- **+12% absolute improvement** in truthful responses
-- Minimax decoder catches and corrects potential hallucinations through adversarial verification
-
-## Overview
-
-Standard LLMs generate responses without verification, leading to hallucinations. This system adds an **adversarial verification layer**:
-
-1. **Generator** creates a draft response
-2. **Adversary** attacks the draft to find weakest claims
-3. **Arbiter** decides: ACCEPT, REJECT (regenerate), or ABSTAIN
-4. If rejected, regenerate with critique feedback (max 3 attempts)
+No arbitrary confidence scores. Binary decisions only.
 
 ## Installation
 
 Requires Python 3.12+ and [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/jd-co/minimax-decoder.git
+git clone https://github.com/yourusername/minimax-decoder.git
 cd minimax-decoder
 uv sync
 ```
 
-## Configuration
-
-Create a `.env` file with your Gemini API key:
+### Install PyTorch for local models
 
 ```bash
-echo "GOOGLE_API_KEY=your-api-key-here" > .env
+uv pip install torch
+```
+
+## Configuration
+
+Create a `.env` file:
+
+```bash
+GOOGLE_API_KEY=your-gemini-api-key
 ```
 
 Get a free API key at [Google AI Studio](https://aistudio.google.com/apikey).
 
 ## Usage
 
-### Basic Usage
+### Run with Local SLM
 
 ```bash
-# Custom prompt
-uv run python main.py --prompt "What year was the Eiffel Tower built?"
-
-# Run a predefined test
-uv run python main.py --test safe_algorithm
-
-# List all test prompts
-uv run python main.py --list-tests
+# SmolLM2-360M as generator, Gemini Flash as verifier
+uv run python main.py -g smollm2-360m-local -a gemini-flash \
+    --prompt "What happens if you eat watermelon seeds?"
 ```
 
 ### Benchmarking
 
-Run evaluation on TruthfulQA dataset:
-
 ```bash
+# Run SmolLM2 + Minimax (100 questions)
+uv run python benchmark.py -g smollm2-360m-local -a gemini-flash --limit 100
+
+# Run Qwen-1.5B vanilla baseline (for comparison)
+uv run python benchmark.py -g qwen2.5-1.5b-local --vanilla-only --limit 100
+
 # Quick test (10 questions)
-uv run python benchmark.py --sample 10
-
-# Full benchmark (50 questions)
-uv run python benchmark.py --sample 50
-
-# Without vanilla baseline (faster)
-uv run python benchmark.py --sample 20 --no-vanilla
-
-# See all options
-uv run python benchmark.py --help
+uv run python benchmark.py -g smollm2-360m-local -a gemini-flash --limit 10
 ```
 
-**Benchmark output:**
-```
-============================================================
-BENCHMARK RESULTS
-============================================================
-
-Total Questions: 100
-
---- MINIMAX DECODER ---
-Decoder Decisions:
-  Accepted:   98
-  Abstained:  2
-  Avg Attempts: 1.85
-
-LLM Judge Verdicts:
-  Truthful:      78 (78.0%)
-  Hallucination: 4 (4.0%)
-  Refusal:       0
-  Mixed:         18
-
---- VANILLA GEMINI ---
-LLM Judge Verdicts:
-  Truthful:      66 (66.0%)
-  Hallucination: 13 (13.0%)
-  Refusal:       0
-  Mixed:         21
-
---- COMPARISON ---
-Truthful Rate:      +12.0% (BETTER)
-Hallucination Rate: -9.0% (BETTER)
-```
-
-### Test Prompts
-
-The system includes test prompts to demonstrate hallucination detection:
-
-| Test | Type | Expected Behavior |
-|------|------|-------------------|
-| `hallucination_study` | Fabricated study | Should reject or say "I don't know" |
-| `fake_python_feature` | Non-existent feature | Should reject false premise |
-| `fabricated_person` | Made-up researcher | Should express uncertainty |
-| `false_premise` | Incorrect assumption | Should correct the premise |
-| `safe_algorithm` | Valid question | Should accept (possibly after refinement) |
-| `safe_capital` | Simple fact | Should accept quickly |
-| `safe_protocol` | Technical explanation | Should accept |
-
-### CLI Options
+### List Available Models
 
 ```bash
-uv run python main.py --help
-
-Options:
-  --prompt, -p       Custom prompt to test
-  --test, -t         Run a predefined test prompt
-  --api-key, -k      Gemini API key (or use GOOGLE_API_KEY env var)
-  --max-attempts, -m Maximum generation attempts (default: 3)
-  --threshold        Attack confidence threshold (default: 0.7)
-  --quiet, -q        Suppress verbose output
-  --json             Output result as JSON
-  --run-all-tests    Run all predefined test prompts
-  --list-tests       List all predefined test prompts
+uv run python benchmark.py --list-models
 ```
 
-## Architecture
+**Supported models:**
+| Model | Type | Provider |
+|-------|------|----------|
+| `smollm2-360m-local` | SLM | Local (HuggingFace) |
+| `smollm2-1.7b-local` | SLM | Local |
+| `qwen2.5-0.5b-local` | SLM | Local |
+| `qwen2.5-1.5b-local` | SLM | Local |
+| `gemini-flash` | LLM | Google API |
+| `gemini-pro` | LLM | Google API |
+| `llama-3.2-1b` | SLM | Groq API |
+| `llama-3.2-3b` | SLM | Groq API |
+
+## Project Structure
 
 ```
 minimax_decoder/
-├── models.py      # Pydantic data structures
-├── agents.py      # Generator, Adversary, Arbiter implementations
-├── decoder.py     # Main game loop orchestration
-├── main.py        # CLI entry point
-├── benchmark.py   # TruthfulQA evaluation with LLM-as-Judge
-├── data/          # TruthfulQA dataset
-└── .env           # API key (not committed)
+├── models.py          # Pydantic data structures
+├── agents.py          # Generator, Adversary, Arbiter
+├── decoder.py         # Main verification loop
+├── benchmark.py       # TruthfulQA evaluation
+├── config.py          # Model configurations
+├── main.py            # CLI entry point
+├── providers/         # Model providers
+│   ├── local.py       # HuggingFace Transformers
+│   ├── gemini.py      # Google Gemini API
+│   ├── groq.py        # Groq API
+│   └── huggingface.py # HuggingFace Inference API
+├── data/              # TruthfulQA dataset
+└── results/           # Benchmark results
 ```
-
-### Components
-
-**Generator** (`GeneratorAgent`)
-- Uses Gemini 2.0 Flash for fast drafting
-- Extracts key claims from responses
-- Incorporates critique feedback on regeneration
-
-**Adversary** (`AdversaryAgent`)
-- Aggressive fact-checker role
-- Identifies weakest claim in each response
-- Returns confidence score (0-1) and severity (critical/moderate/minor)
-
-**Arbiter** (`Arbiter`)
-- Simple Python logic gate
-- Weighted score = confidence × severity_weight
-- Thresholds determine ACCEPT/REJECT/ABSTAIN
-
-**LLM Judge** (`LLMJudge`)
-- Evaluates responses against TruthfulQA reference answers
-- Returns verdict: truthful / hallucination / refusal / mixed
-- Based on [TruthfulQA's GPT-judge methodology](https://github.com/sylinrl/TruthfulQA)
-
-### Decision Logic
-
-```
-weighted_score = attack_confidence × severity_weight
-
-if weighted_score < 0.3:
-    → ACCEPT (low risk)
-elif weighted_score < 0.7:
-    → REJECT if attempts remain, else ACCEPT with caveats
-else:
-    → REJECT if attempts remain, else ABSTAIN
-```
-
-## Evaluation Methodology
-
-We use **LLM-as-Judge** based on TruthfulQA's evaluation protocol:
-
-1. **Generate response** with both Minimax decoder and vanilla baseline
-2. **Judge evaluates** each response against reference answers
-3. **Verdict assigned**: truthful / hallucination / refusal / mixed
-4. **Metrics computed**: truthful rate, hallucination rate, etc.
-
-This approach achieves 90-95% agreement with human evaluators ([source](https://arxiv.org/abs/2109.07958)).
-
-## Research Background
-
-This prototype implements concepts from:
-
-- **Decoding Game** (ICLR 2025) - Game-theoretic analysis of text generation
-- **Consensus Game** (ICLR 2024) - Equilibrium-based decoding
-- **DoLa** - Contrastive decoding for factuality
-- **Test-time compute scaling** - System 2 thinking approaches
-
-### Comparison with Related Work
-
-| Approach | Game-Theoretic | Active Adversary | Inference-Only | Abstention |
-|----------|---------------|------------------|----------------|------------|
-| **This Work** | Yes | **Yes** | Yes | Yes |
-| Decoding Game | Yes | No (theory) | N/A | No |
-| Consensus Game | Yes | No | Yes | No |
-| DoLa | No | No | Yes | No |
-| Self-Verification | No | No | Yes | Weak |
 
 ## Programmatic Usage
 
 ```python
-from decoder import MinimaxDecoder
+from decoder import create_decoder_from_config
 
-decoder = MinimaxDecoder(
-    api_key="your-api-key",
+decoder = create_decoder_from_config(
+    generator_model="smollm2-360m-local",
+    adversary_model="gemini-flash",
     max_attempts=3,
-    attack_threshold=0.7,
-    verbose=True
 )
 
 result = decoder.decode("What causes rainbows?")
@@ -259,51 +139,54 @@ result = decoder.decode("What causes rainbows?")
 if result.decision.decision.value == "accept":
     print(result.decision.final_response)
 elif result.decision.decision.value == "abstain":
-    print("System uncertain:", result.decision.reasoning)
-
-# Access metrics
-print(f"Attempts: {result.metrics.total_attempts}")
-print(f"Time: {result.metrics.time_taken_seconds:.2f}s")
+    print("Uncertain - refusing to answer")
+    print("Reason:", result.decision.reasoning)
 ```
+
+## Design Decisions
+
+### Why Binary Decisions?
+
+Previous versions used LLM-generated confidence scores (0-1). Problem: **LLMs hallucinate scores too**.
+
+Current approach:
+- Verifier outputs `issue_found: true/false`
+- No arbitrary thresholds to tune
+- More defensible for research
+
+### Why Abstain?
+
+When the system can't verify an answer after 3 attempts, it refuses rather than risk hallucination.
+
+**Trade-off:**
+- Higher abstention rate (42%)
+- But only 3% hallucination on accepted answers
+
+For high-stakes applications (medical, legal, financial), refusing when uncertain is better than hallucinating.
 
 ## Limitations
 
-- **Time overhead**: ~4-8x slower than vanilla (multiple LLM calls)
-- **API costs**: Requires 2-3 API calls per question
-- **Modern LLMs**: Large models (GPT-4, Gemini) already have low hallucination rates on common misconceptions
-- **Best suited for**: Smaller models, obscure facts, or high-stakes applications
+- **Latency**: 3-10x slower than vanilla (verification rounds)
+- **API costs**: Requires Gemini API calls for verification
+- **Abstention**: May refuse valid questions if verifier is too strict
+
+## Citation
+
+```bibtex
+@misc{minimax-decoder-2025,
+  title={Minimax Decoder: Adversarial Verification for SLM Hallucination Reduction},
+  author={Sheikh Javeed},
+  year={2025},
+  url={https://github.com/yourusername/minimax-decoder}
+}
+```
 
 ## License
 
 MIT
 
-## Citation
-
-If you use this work, please cite:
-
-```bibtex
-@misc{minimax-decoder,
-  title={Active Minimax Decoder: Adversarial Verification for LLM Hallucination Reduction},
-  author={jd-co},
-  year={2025},
-  url={https://github.com/jd-co/minimax-decoder}
-}
-```
-
 ## References
 
 - [TruthfulQA: Measuring How Models Mimic Human Falsehoods](https://arxiv.org/abs/2109.07958)
 - [Decoding Game: On Minimax Optimality of Heuristic Text Generation Strategies](https://arxiv.org/abs/2410.03968)
-- [The Consensus Game: Language Model Generation via Equilibrium Search](https://arxiv.org/abs/2310.09139)
-
-## Contributing
-
-Contributions welcome! Areas of interest:
-
-- [x] TruthfulQA benchmark evaluation
-- [x] LLM-as-Judge evaluation methodology
-- [ ] More datasets (HaluEval, FEVER)
-- [ ] Local model support (Llama, Mistral) with logit extraction
-- [ ] Process Reward Model integration
-- [ ] Async/parallel execution for speed
-- [ ] Web UI demo
+- [SmolLM2: A Family of Small Language Models](https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct)

@@ -1,26 +1,26 @@
 """
 Agent implementations for Generator, Adversary, and Arbiter.
+Refactored to use provider abstraction for multi-model support.
 """
+
 import json
 from typing import Optional
-
-from google import genai
 
 from models import (
     DraftResponse,
     AttackResult,
     ClaimAnalysis,
     DecisionType,
-    SeverityLevel,
     ClaimType,
     ConfidenceLevel,
 )
+from providers.base import ModelProvider
 
 
 class GeneratorAgent:
     """
     Player A: Generates draft responses with claim extraction.
-    Uses Gemini 1.5 Flash for speed.
+    Uses any configured model provider.
     """
 
     SYSTEM_PROMPT = """You are a helpful AI assistant. Your task is to answer the user's question
@@ -29,9 +29,31 @@ accurately and comprehensively. As you respond, identify and list the key factua
 Be honest about uncertainty - if you're not sure about something, say so.
 Focus on accuracy over comprehensiveness."""
 
-    def __init__(self, api_key: str):
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-2.0-flash"
+    CLAIM_EXTRACTION_PROMPT = """Analyze this response and extract the key factual claims (max 5).
+
+Response: {response_text}
+
+Return a JSON array of claims. Each claim should have:
+- claim_text: The specific claim
+- claim_type: One of "factual", "opinion", "inference", "procedural"
+- confidence_assessment: One of "high", "medium", "low"
+
+Example format:
+[{{"claim_text": "Python was created in 1991", "claim_type": "factual", "confidence_assessment": "high"}}]
+
+Return ONLY the JSON array, no other text."""
+
+    def __init__(self, provider: ModelProvider, claim_extractor: Optional[ModelProvider] = None):
+        """
+        Initialize generator agent.
+
+        Args:
+            provider: Model provider for generation
+            claim_extractor: Optional separate provider for claim extraction
+                            (defaults to same provider)
+        """
+        self.provider = provider
+        self.claim_extractor = claim_extractor or provider
 
     def generate(
         self, prompt: str, previous_critique: Optional[str] = None
@@ -48,14 +70,10 @@ Focus on accuracy over comprehensiveness."""
         """
         generation_prompt = self._build_prompt(prompt, previous_critique)
 
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=generation_prompt,
-            config=genai.types.GenerateContentConfig(
-                system_instruction=self.SYSTEM_PROMPT,
-            ),
+        response_text = self.provider.generate(
+            prompt=generation_prompt,
+            system_prompt=self.SYSTEM_PROMPT,
         )
-        response_text = response.text
 
         # Extract claims in a separate call for reliability
         claims = self._extract_claims(response_text)
@@ -67,37 +85,24 @@ Focus on accuracy over comprehensiveness."""
     ) -> str:
         """Build the generation prompt with optional critique."""
         if previous_critique:
-            return f"""Original question: {prompt}
+            return f"""Question: {prompt}
 
-Previous attempt was rejected with this critique:
 {previous_critique}
 
-Please generate a NEW response that addresses these concerns. Be more careful
-about factual accuracy and acknowledge uncertainty where appropriate."""
+Now answer the question above:"""
         return prompt
 
     def _extract_claims(self, response_text: str) -> list[ClaimAnalysis]:
         """Extract key claims from response text."""
-        claim_prompt = f"""Analyze this response and extract the key factual claims (max 5).
-
-Response: {response_text}
-
-Return a JSON array of claims. Each claim should have:
-- claim_text: The specific claim
-- claim_type: One of "factual", "opinion", "inference", "procedural"
-- confidence_assessment: One of "high", "medium", "low"
-
-Example format:
-[{{"claim_text": "Python was created in 1991", "claim_type": "factual", "confidence_assessment": "high"}}]
-
-Return ONLY the JSON array, no other text."""
+        claim_prompt = self.CLAIM_EXTRACTION_PROMPT.format(response_text=response_text)
 
         try:
-            claims_response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=claim_prompt,
+            claims_response = self.claim_extractor.generate(
+                prompt=claim_prompt,
+                max_tokens=512,
+                temperature=0.3,  # Lower temperature for structured output
             )
-            claims_text = claims_response.text.strip()
+            claims_text = claims_response.strip()
 
             # Clean up response - remove markdown code blocks if present
             if claims_text.startswith("```"):
@@ -124,99 +129,87 @@ Return ONLY the JSON array, no other text."""
 
 class AdversaryAgent:
     """
-    Player B: Attacks the draft to find weakest claims/hallucinations.
-    Uses Gemini 1.5 Pro for stronger reasoning.
+    Player B: Fact-checker that verifies claims with BINARY decisions.
+    No arbitrary confidence scores - just YES/NO issue detection.
     """
 
-    SYSTEM_PROMPT = """You are an AGGRESSIVE fact-checker whose job is to find errors,
-hallucinations, and unsupported claims. You are SKEPTICAL by default.
+    SYSTEM_PROMPT = """You are a strict fact-checker. Your job is to determine if a response contains factual errors.
 
-YOUR MISSION: Find the WEAKEST point in every response. There is ALWAYS something wrong
-or uncertain - find it.
+CHECK FOR:
+1. FABRICATED FACTS: Made-up names, dates, numbers, statistics
+2. FACTUAL ERRORS: Statements that contradict established facts
+3. COMMON MISCONCEPTIONS: Popular but incorrect beliefs
+4. HALLUCINATED SOURCES: Fake studies, papers, quotes
 
-ATTACK VECTORS (check ALL of these):
-1. FABRICATED FACTS: Names, dates, numbers, statistics that might be made up
-2. FALSE CERTAINTY: Claims stated confidently that are actually uncertain
-3. LOGICAL ERRORS: Flawed reasoning or non-sequiturs
-4. OUTDATED INFO: Claims that might have been true but are now false
-5. HALLUCINATED SOURCES: Fake studies, papers, quotes that don't exist
-6. OVERGENERALIZATION: Specific claims applied too broadly
-7. MISSING CAVEATS: Important exceptions or limitations not mentioned
-8. COMMON MISCONCEPTIONS: Popular but incorrect beliefs repeated
+IMPORTANT RULES:
+- Only flag CLEAR factual errors, not style or minor issues
+- If the response is factually correct (even if incomplete), say NO ISSUE
+- If the response says "I don't know" or refuses to answer, say NO ISSUE
+- Be SPECIFIC about what is wrong and what is correct
 
-RULES:
-- Do NOT trust confident language - liars speak confidently too
-- ALWAYS find something - "looks good" is not acceptable
-- Be SPECIFIC - quote the exact problematic text
-- Provide EVIDENCE for why it's wrong if you can
-- Rate your confidence HONESTLY (0-1)
+You must give a binary YES/NO decision. No scores, no maybes."""
 
-SEVERITY GUIDE:
-- critical: Factually wrong in a way that could cause harm or major misunderstanding
-- moderate: Likely incorrect or misleading but not dangerous
-- minor: Possibly uncertain or could be more precise
+    ATTACK_PROMPT = """Question: {original_prompt}
 
-You are the last line of defense against hallucinations. Be ruthless."""
+Response to verify:
+{response_text}
 
-    def __init__(self, api_key: str):
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-2.0-flash-lite" 
+Claims identified:
+{claims_text}
+
+Is there a FACTUAL ERROR in this response?
+
+Return JSON with this EXACT format:
+{{
+    "issue_found": true or false,
+    "problematic_claim": "The specific wrong claim" or null if no issue,
+    "reasoning": "Why this is wrong / why response is correct",
+    "correction": "What is actually true" or null
+}}
+
+Return ONLY the JSON."""
+
+    def __init__(self, provider: ModelProvider):
+        """
+        Initialize adversary agent.
+
+        Args:
+            provider: Model provider for adversarial analysis
+        """
+        self.provider = provider
 
     def attack(self, original_prompt: str, draft: DraftResponse) -> AttackResult:
         """
-        Attack the draft response to find the weakest claim.
+        Verify the draft response for factual errors.
 
         Args:
             original_prompt: The original user question
             draft: The generator's draft response
 
         Returns:
-            AttackResult identifying the weakest claim
+            AttackResult with binary issue_found decision
         """
-        # Format claims for the adversary to analyze
         claims_text = self._format_claims(draft.key_claims)
 
-        attack_prompt = f"""Original question: {original_prompt}
-
-Draft response:
-{draft.response_text}
-
-Identified claims:
-{claims_text}
-
-TASK: Find the WEAKEST claim in this response. This is the claim most likely to be:
-- Factually incorrect
-- A hallucination
-- Unsupported or speculative
-- Misleading
-
-Return your analysis as JSON with this exact format:
-{{
-    "weakest_claim": "The exact problematic claim or statement",
-    "attack_reasoning": "Why this claim is suspect - be specific",
-    "alternative_truth": "What is actually true, if you know (or null if unsure)",
-    "confidence_in_attack": 0.0 to 1.0,
-    "severity": "critical" or "moderate" or "minor"
-}}
-
-Return ONLY the JSON, no other text."""
+        attack_prompt = self.ATTACK_PROMPT.format(
+            original_prompt=original_prompt,
+            response_text=draft.response_text,
+            claims_text=claims_text,
+        )
 
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=attack_prompt,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_PROMPT,
-                ),
+            response = self.provider.generate(
+                prompt=attack_prompt,
+                system_prompt=self.SYSTEM_PROMPT,
             )
-            return self._parse_attack_response(response.text)
+            return self._parse_attack_response(response)
         except Exception as e:
-            # Fallback if parsing fails
+            # On parsing error, assume no issue (conservative)
             return AttackResult(
-                weakest_claim="Unable to parse attack",
-                attack_reasoning=f"Parsing error: {str(e)}",
-                confidence_in_attack=0.3,
-                severity=SeverityLevel.MINOR,
+                issue_found=False,
+                problematic_claim=None,
+                reasoning=f"Verification error: {str(e)}",
+                correction=None,
             )
 
     def _format_claims(self, claims: list[ClaimAnalysis]) -> str:
@@ -231,7 +224,7 @@ Return ONLY the JSON, no other text."""
         )
 
     def _parse_attack_response(self, response_text: str) -> AttackResult:
-        """Parse the adversary's attack response."""
+        """Parse the adversary's binary verification response."""
         text = response_text.strip()
 
         # Clean up markdown code blocks if present
@@ -244,40 +237,23 @@ Return ONLY the JSON, no other text."""
         data = json.loads(text)
 
         return AttackResult(
-            weakest_claim=data.get("weakest_claim", "Unknown"),
-            attack_reasoning=data.get("attack_reasoning", "No reasoning provided"),
-            alternative_truth=data.get("alternative_truth"),
-            confidence_in_attack=float(data.get("confidence_in_attack", 0.5)),
-            severity=SeverityLevel(data.get("severity", "moderate")),
+            issue_found=bool(data.get("issue_found", False)),
+            problematic_claim=data.get("problematic_claim"),
+            reasoning=data.get("reasoning", "No reasoning provided"),
+            correction=data.get("correction"),
         )
 
 
 class Arbiter:
     """
-    Decision-making logic gate.
-    Determines: ACCEPT, REJECT (regenerate), or ABSTAIN.
+    Binary decision-making logic gate.
+    Simple logic: Issue found? → REJECT/ABSTAIN. No issue? → ACCEPT.
+    No arbitrary confidence scores.
     """
 
-    DEFAULT_SEVERITY_WEIGHTS: dict[SeverityLevel, float] = {
-        SeverityLevel.CRITICAL: 1.0,
-        SeverityLevel.MODERATE: 0.7,
-        SeverityLevel.MINOR: 0.4,
-    }
-
-    def __init__(
-        self,
-        attack_confidence_threshold: float = 0.7,
-        severity_weights: Optional[dict[SeverityLevel, float]] = None,
-    ):
-        """
-        Initialize arbiter with decision thresholds.
-
-        Args:
-            attack_confidence_threshold: Above this, attacks are considered successful
-            severity_weights: Multipliers for severity levels
-        """
-        self.attack_confidence_threshold = attack_confidence_threshold
-        self.severity_weights = severity_weights or self.DEFAULT_SEVERITY_WEIGHTS
+    def __init__(self):
+        """Initialize arbiter. No thresholds needed - binary decisions only."""
+        pass
 
     def decide(
         self,
@@ -287,61 +263,40 @@ class Arbiter:
         max_attempts: int = 3,
     ) -> tuple[DecisionType, str]:
         """
-        Make decision based on attack results.
+        Make binary decision based on whether issue was found.
+
+        Logic:
+        - No issue found → ACCEPT
+        - Issue found + attempts remaining → REJECT (regenerate)
+        - Issue found + max attempts reached → ABSTAIN (refuse to answer)
 
         Args:
             draft: The current draft response
-            attack: The adversary's attack result
+            attack: The adversary's verification result
             attempt_number: Current attempt (1-indexed)
             max_attempts: Maximum regeneration attempts
 
         Returns:
             Tuple of (decision, reasoning)
         """
-        # Calculate weighted attack score
-        severity_weight = self.severity_weights.get(attack.severity, 0.5)
-        weighted_score = attack.confidence_in_attack * severity_weight
-
-        # Decision logic
-        if weighted_score < 0.3:
-            # Attack didn't find significant issues
+        if not attack.issue_found:
+            # No factual error detected - accept the response
             return (
                 DecisionType.ACCEPT,
-                f"Attack confidence ({attack.confidence_in_attack:.2f}) with {attack.severity.value} "
-                f"severity yields low risk score ({weighted_score:.2f}). Accepting response.",
+                f"Verification passed. {attack.reasoning}",
             )
 
-        elif weighted_score < self.attack_confidence_threshold:
-            # Moderate concern - could go either way
-            if attack.severity == SeverityLevel.MINOR:
-                return (
-                    DecisionType.ACCEPT,
-                    f"Moderate attack confidence ({attack.confidence_in_attack:.2f}) but "
-                    f"minor severity. Accepting with caveat.",
-                )
-            elif attempt_number < max_attempts:
-                return (
-                    DecisionType.REJECT,
-                    f"Moderate concern (score: {weighted_score:.2f}). Regenerating to "
-                    f"address: {attack.weakest_claim}",
-                )
-            else:
-                return (
-                    DecisionType.ACCEPT,
-                    f"Moderate concern but max attempts reached. Accepting with caveats.",
-                )
-
+        # Issue was found
+        if attempt_number < max_attempts:
+            # Still have attempts - regenerate
+            return (
+                DecisionType.REJECT,
+                f"Issue found: {attack.problematic_claim}. Regenerating.",
+            )
         else:
-            # High confidence attack
-            if attempt_number < max_attempts:
-                return (
-                    DecisionType.REJECT,
-                    f"High risk detected (score: {weighted_score:.2f}). "
-                    f"Problematic claim: {attack.weakest_claim}. Regenerating.",
-                )
-            else:
-                return (
-                    DecisionType.ABSTAIN,
-                    f"High risk persists after {max_attempts} attempts. "
-                    f"Cannot confidently answer. Issue: {attack.attack_reasoning}",
-                )
+            # Max attempts reached - refuse to answer
+            return (
+                DecisionType.ABSTAIN,
+                f"Cannot provide accurate answer after {max_attempts} attempts. "
+                f"Issue: {attack.problematic_claim}. {attack.reasoning}",
+            )
