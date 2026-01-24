@@ -12,6 +12,7 @@ dependencies = [
     "huggingface-hub>=0.34.0,<1.0",
     "transformers>=4.45.0",
     "accelerate>=0.30.0",
+    "datasets>=4.5.0",
 ]
 
 [project.optional-dependencies]
