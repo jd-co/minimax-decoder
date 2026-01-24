@@ -93,16 +93,17 @@ uv run python benchmark.py --list-models
 ```
 
 **Supported models:**
-| Model | Type | Provider |
-|-------|------|----------|
-| `smollm2-360m-local` | SLM | Local (HuggingFace) |
-| `smollm2-1.7b-local` | SLM | Local |
-| `qwen2.5-0.5b-local` | SLM | Local |
-| `qwen2.5-1.5b-local` | SLM | Local |
-| `gemini-flash` | LLM | Google API |
-| `gemini-pro` | LLM | Google API |
-| `llama-3.2-1b` | SLM | Groq API |
-| `llama-3.2-3b` | SLM | Groq API |
+| Model | Params | Architecture | Provider |
+|-------|--------|--------------|----------|
+| `smollm2-360m-local` | 360M | Transformer | Local |
+| `smollm2-1.7b-local` | 1.7B | Transformer | Local |
+| `qwen2.5-0.5b-local` | 0.5B | Transformer | Local |
+| `qwen2.5-1.5b-local` | 1.5B | Transformer | Local |
+| `lfm2-350m-local` | 350M | **Hybrid (Liquid)** | Local |
+| `lfm2-700m-local` | 700M | **Hybrid (Liquid)** | Local |
+| `lfm2-1.2b-local` | 1.2B | **Hybrid (Liquid)** | Local |
+| `gemini-flash` | - | - | Google API |
+| `llama-3.2-1b` | 1B | Transformer | Groq API |
 
 ## Project Structure
 

@@ -18,14 +18,20 @@ class LocalProvider(ModelProvider):
     Local inference provider using HuggingFace Transformers.
 
     Supported models:
-    - HuggingFaceTB/SmolLM2-360M-Instruct (360M params, ~720MB)
-    - HuggingFaceTB/SmolLM2-1.7B-Instruct (1.7B params, ~3.4GB)
-    - Qwen/Qwen2.5-0.5B-Instruct (500M params, ~1GB)
-    - Qwen/Qwen2.5-1.5B-Instruct (1.5B params, ~3GB)
+    - HuggingFaceTB/SmolLM2-360M-Instruct (360M params, Transformer)
+    - HuggingFaceTB/SmolLM2-1.7B-Instruct (1.7B params, Transformer)
+    - Qwen/Qwen2.5-0.5B-Instruct (500M params, Transformer)
+    - Qwen/Qwen2.5-1.5B-Instruct (1.5B params, Transformer)
+    - LiquidAI/LFM2-350M (350M params, Hybrid architecture)
+    - LiquidAI/LFM2-700M (700M params, Hybrid architecture)
+    - LiquidAI/LFM2-1.2B (1.2B params, Hybrid architecture)
+    - LiquidAI/LFM2.5-1.2B-Instruct (1.2B params, Hybrid architecture)
 
     Memory requirements (approximate):
-    - 360M model: ~1GB RAM
+    - 350M model: ~1GB RAM
     - 500M model: ~1.5GB RAM
+    - 700M model: ~2GB RAM
+    - 1.2B model: ~3GB RAM
     - 1.5B model: ~4GB RAM
     - 1.7B model: ~5GB RAM
     """
@@ -195,23 +201,55 @@ def get_local_model_info() -> dict[str, dict]:
             "params": "360M",
             "memory": "~1GB",
             "speed": "Fast on CPU",
+            "architecture": "Transformer",
         },
         "smollm2-1.7b-local": {
             "model_id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
             "params": "1.7B",
             "memory": "~5GB",
             "speed": "Moderate on CPU",
+            "architecture": "Transformer",
         },
         "qwen2.5-0.5b-local": {
             "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
             "params": "500M",
             "memory": "~1.5GB",
             "speed": "Fast on CPU",
+            "architecture": "Transformer",
         },
         "qwen2.5-1.5b-local": {
             "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
             "params": "1.5B",
             "memory": "~4GB",
             "speed": "Moderate on CPU",
+            "architecture": "Transformer",
+        },
+        "lfm2-350m-local": {
+            "model_id": "LiquidAI/LFM2-350M",
+            "params": "350M",
+            "memory": "~1GB",
+            "speed": "2x faster than Qwen (optimized)",
+            "architecture": "Hybrid (Liquid)",
+        },
+        "lfm2-700m-local": {
+            "model_id": "LiquidAI/LFM2-700M",
+            "params": "700M",
+            "memory": "~2GB",
+            "speed": "2x faster than Qwen (optimized)",
+            "architecture": "Hybrid (Liquid)",
+        },
+        "lfm2-1.2b-local": {
+            "model_id": "LiquidAI/LFM2-1.2B",
+            "params": "1.2B",
+            "memory": "~3GB",
+            "speed": "2x faster than Qwen (optimized)",
+            "architecture": "Hybrid (Liquid)",
+        },
+        "lfm2.5-1.2b-local": {
+            "model_id": "LiquidAI/LFM2.5-1.2B-Instruct",
+            "params": "1.2B",
+            "memory": "~3GB",
+            "speed": "2x faster than Qwen (optimized)",
+            "architecture": "Hybrid (Liquid)",
         },
     }

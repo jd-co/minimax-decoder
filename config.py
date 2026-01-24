@@ -150,6 +150,37 @@ MODELS: dict[str, ModelConfig] = {
         params_billions=1.5,
         is_slm=True,
     ),
+    # ========================================
+    # Liquid AI Models (Hybrid Architecture)
+    # ========================================
+    "lfm2-350m-local": ModelConfig(
+        provider=ProviderType.LOCAL,
+        model_id="LiquidAI/LFM2-350M",
+        display_name="Liquid LFM2 350M (Local)",
+        params_billions=0.35,
+        is_slm=True,
+    ),
+    "lfm2-700m-local": ModelConfig(
+        provider=ProviderType.LOCAL,
+        model_id="LiquidAI/LFM2-700M",
+        display_name="Liquid LFM2 700M (Local)",
+        params_billions=0.7,
+        is_slm=True,
+    ),
+    "lfm2-1.2b-local": ModelConfig(
+        provider=ProviderType.LOCAL,
+        model_id="LiquidAI/LFM2-1.2B",
+        display_name="Liquid LFM2 1.2B (Local)",
+        params_billions=1.2,
+        is_slm=True,
+    ),
+    "lfm2.5-1.2b-local": ModelConfig(
+        provider=ProviderType.LOCAL,
+        model_id="LiquidAI/LFM2.5-1.2B-Instruct",
+        display_name="Liquid LFM2.5 1.2B (Local)",
+        params_billions=1.2,
+        is_slm=True,
+    ),
 }
 
 
