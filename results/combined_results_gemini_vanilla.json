@@ -1,0 +1,19 @@
+{
+  "model": "gemini-2.0-flash",
+  "model_name": "Gemini-2.0-Flash",
+  "method": "Vanilla",
+  "mc_summary": {
+    "truthful_rate": 89.35,
+    "hallucination_rate": 10.65,
+    "abstention_rate": 0.0
+  },
+  "open_summary": {
+    "truthful": 648,
+    "hallucination": 66,
+    "refusal": 1,
+    "mixed": 50,
+    "truthful_rate": 79.31,
+    "hallucination_rate": 8.08
+  },
+  "timestamp": "2026-01-26T13:20:45.104251"
+}

@@ -1,0 +1,20 @@
+{
+  "generator": "SmolLM2-360M",
+  "adversary": "Qwen2.5-1.5B",
+  "mc_summary": {
+    "hallucination_rate": 15.79,
+    "truthful_rate": 81.88,
+    "abstention_rate": 2.33,
+    "accepted": 798,
+    "abstained": 19
+  },
+  "open_summary": {
+    "truthful": 638,
+    "hallucination": 54,
+    "refusal": 17,
+    "mixed": 79,
+    "truthful_rate": 78.09,
+    "hallucination_rate": 6.61
+  },
+  "timestamp": "2026-01-26T13:16:31.385211"
+}
