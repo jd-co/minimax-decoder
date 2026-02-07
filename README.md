@@ -1,5 +1,7 @@
 # Active Minimax Decoder (AMD)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18514344.svg)](https://doi.org/10.5281/zenodo.18514344)
+
 **A training-free framework for reducing hallucinations in Small Language Models via binary adversarial verification**
 
 > SmolLM2-360M with AMD achieves **0.61% hallucination rate** — **17× lower than Gemini-2.0-Flash** (10.65%) and 96% lower than its own vanilla baseline (15.67%).
@@ -48,7 +50,7 @@ No confidence scores. Binary decisions only.
 Requires Python 3.12+ and [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/sheikjaveed/minimax-decoder.git
+git clone https://github.com/jd-co/minimax-decoder.git
 cd minimax-decoder
 uv sync
 ```
@@ -205,12 +207,13 @@ Self-verification inherits the model's own biases. AMD uses an external adversar
 ## Citation
 
 ```bibtex
-@misc{javeed2025amd,
+@misc{javeed2026amd,
   title={Active Minimax Decoder: Reducing Hallucinations in Small Language Models via Binary Adversarial Verification},
   author={Javeed, Sheik},
   year={2026},
-  howpublished={\url{https://github.com/sheikjaveed/minimax-decoder}},
-  note={RVAI Global}
+  doi={10.5281/zenodo.18514344},
+  publisher={Zenodo},
+  url={https://doi.org/10.5281/zenodo.18514344}
 }
 ```
 
